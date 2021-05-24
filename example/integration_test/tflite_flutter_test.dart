@@ -2,17 +2,16 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-// @dart=2.11
+@Timeout(Duration(minutes: 1))
 
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tflite_flutter/tflite_flutter.dart' as tfl;
-import 'package:e2e/e2e.dart';
 
 final dataFileName = 'permute_uint8.tflite';
 final missingFileName = 'missing.tflite';
@@ -23,9 +22,9 @@ final int64FileName = 'int64.bin';
 final multiInputFileName = 'multi_add.bin';
 final addFileName = 'add.bin';
 
-//flutter drive --driver=test_driver/tflite_flutter_plugin_example_e2e_test.dart test/tflite_flutter_plugin_example_e2e.dart
+//flutter drive --driver=test_driver/integration_test.dart --target=integration_test/tflite_flutter_test.dart
 void main() {
-  E2EWidgetsFlutterBinding.ensureInitialized();
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   test('version', () {
     expect(tfl.version, isNotEmpty);
@@ -52,7 +51,6 @@ void main() {
   test('interpreter from address', () async {
     final interpreter = await tfl.Interpreter.fromAsset('test/$dataFileName');
     final interpreter2 = tfl.Interpreter.fromAddress(interpreter.address);
-    interpreter.close();
     interpreter2.close();
   });
 
@@ -81,7 +79,7 @@ void main() {
   });
 
   group('interpreter', () {
-    tfl.Interpreter interpreter;
+    late tfl.Interpreter interpreter;
     setUp(() async {
       final dataFile = await getFile(dataFileName);
       interpreter = tfl.Interpreter.fromFile(dataFile);
@@ -132,7 +130,7 @@ void main() {
       expect(interpreter.getOutputTensor(0), isNotNull);
     });
 
-    test('get input tensor throws argument error', () {
+    test('get output tensor throws argument error', () {
       expect(() => interpreter.getOutputTensor(33), throwsA(isArgumentError));
     });
 
@@ -152,7 +150,7 @@ void main() {
     });
 
     group('tensors', () {
-      List<tfl.Tensor> tensors;
+      late List<tfl.Tensor> tensors;
       setUp(() => tensors = interpreter.getInputTensors());
 
       test('name', () {
@@ -184,17 +182,17 @@ void main() {
 
       if (Platform.isAndroid) {
         group('quantization', () {
-          tfl.Interpreter interpreter;
+          late tfl.Interpreter interpreter;
           setUp(() async {
             interpreter =
                 await tfl.Interpreter.fromAsset('test/$quantFileName');
           });
-          tearDown(() => interpreter.close());
           test('params', () {
             interpreter.allocateTensors();
             final tensor = interpreter.getInputTensor(0);
             print(tensor.params);
           });
+          tearDown(() => interpreter.close());
         });
       }
     });
@@ -205,11 +203,9 @@ void main() {
       test('single input', () async {
         tfl.Interpreter interpreter;
         interpreter = await tfl.Interpreter.fromAsset('test/$addFileName');
-        var o = [1.23, 6.54, 7.81];
-        var two = [o, o, o, o, o, o, o, o];
-        var three = [two, two, two, two, two, two, two, two];
-        var four = [three];
-        var output = List(1 * 8 * 8 * 3).reshape([1, 8, 8, 3]);
+        var four =
+            List.filled(1, List.filled(8, List.filled(8, [1.23, 6.54, 7.81])));
+        var output = List.filled(1 * 8 * 8 * 3, 0.0).reshape([1, 8, 8, 3]);
         interpreter.run(four, output);
         var exp = '';
         if (output[0][0][0][0] is double) {
@@ -218,8 +214,46 @@ void main() {
         expect(exp, '3.69');
         interpreter.close();
       });
-      test('multiple input', () async {
+
+      test('single input bytes', () async {
         tfl.Interpreter interpreter;
+        interpreter = await tfl.Interpreter.fromAsset('test/$addFileName');
+        var four =
+            List.filled(1, List.filled(8, List.filled(8, [1.23, 6.54, 7.81])));
+        var output = List.filled(1 * 8 * 8 * 3, 0.0).reshape([1, 8, 8, 3]);
+        var inputBytes = tfl.ByteConversionUtils.convertObjectToBytes(
+            four, tfl.TfLiteType.float32);
+        var outputBytes = tfl.ByteConversionUtils.convertObjectToBytes(
+            output, tfl.TfLiteType.float32);
+        interpreter.run(inputBytes, outputBytes);
+        var outputList = tfl.ByteConversionUtils.convertBytesToObject(
+                outputBytes, tfl.TfLiteType.float32, [1, 8, 8, 3])
+            as List<List<List<List<double>>>>;
+        expect(outputList[0][0][0][0].toStringAsFixed(2), '3.69');
+        interpreter.close();
+      });
+
+      test('single input buffer', () async {
+        tfl.Interpreter interpreter;
+        interpreter = await tfl.Interpreter.fromAsset('test/$addFileName');
+        var four =
+            List.filled(1, List.filled(8, List.filled(8, [1.23, 6.54, 7.81])));
+        var output = List.filled(1 * 8 * 8 * 3, 0.0).reshape([1, 8, 8, 3]);
+        var inputBuffer = tfl.ByteConversionUtils.convertObjectToBytes(
+                four, tfl.TfLiteType.float32)
+            .buffer;
+        var outputBuffer = tfl.ByteConversionUtils.convertObjectToBytes(
+                output, tfl.TfLiteType.float32)
+            .buffer;
+        interpreter.run(inputBuffer, outputBuffer);
+        var outputElement =
+            ByteData.view(outputBuffer).getFloat32(0, Endian.little);
+        expect(outputElement.toStringAsFixed(2), '3.69');
+        interpreter.close();
+      });
+
+      test('multiple input', () async {
+        late tfl.Interpreter interpreter;
         interpreter = await tfl.Interpreter.fromAsset(
           'test/$multiInputFileName',
         );
@@ -238,8 +272,8 @@ void main() {
         var input0 = [1.23];
         var input1 = [2.43];
         var inputs = [input0, input1, input0, input1];
-        var output0 = List<double>(1);
-        var output1 = List<double>(1);
+        var output0 = List<double>.filled(1, 0);
+        var output1 = List<double>.filled(1, 0);
         var outputs = {0: output0, 1: output1};
         interpreter.runForMultipleInputs(inputs, outputs);
         print(interpreter.lastNativeInferenceDurationMicroSeconds);
@@ -267,8 +301,8 @@ void main() {
         var input0 = [1.23];
         var input1 = [2.43];
         var inputs = [input0, input1, input0, input1];
-        var output0 = List<double>(1);
-        var output1 = List<double>(1);
+        var output0 = List<double>.filled(1, 0);
+        var output1 = List<double>.filled(1, 0);
         var outputs = {0: output0, 1: output1};
         interpreter.runForMultipleInputs(inputs, outputs);
         print(interpreter.lastNativeInferenceDurationMicroSeconds);
@@ -286,7 +320,7 @@ void main() {
       final threeD = List.filled(8, twoD);
       final fourD = List.filled(2, threeD);
 
-      var output = List(2 * 4 * 4 * 12).reshape([2, 4, 4, 12]);
+      var output = List.filled(2 * 4 * 4 * 12, 0).reshape([2, 4, 4, 12]);
 
       interpreter.run(fourD, output);
 
@@ -303,13 +337,14 @@ void main() {
       final threeD = List.filled(8, twoD);
       final fourD = List.filled(2, threeD);
 
-      var output = List(2 * 4 * 4 * 12).reshape([2, 4, 4, 12]);
+      var output = List.filled(2 * 4 * 4 * 12, 0).reshape([2, 4, 4, 12]);
 
       interpreter.run(fourD, output);
 
       expect(output[0][0][0], [3, 7, -4, 3, 7, -4, 3, 7, -4, 3, 7, -4]);
       interpreter.close();
     });
+
     if (Platform.isAndroid) {
       test('using set use NnApi', () async {
         tfl.Interpreter interpreter;
@@ -319,7 +354,7 @@ void main() {
         var two = [o, o, o, o, o, o, o, o];
         var three = [two, two, two, two, two, two, two, two];
         var four = [three];
-        var output = List(1 * 8 * 8 * 3).reshape([1, 8, 8, 3]);
+        var output = List.filled(1 * 8 * 8 * 3, 0).reshape([1, 8, 8, 3]);
         interpreter.run(four, output);
         var exp = '';
         if (output[0][0][0][0] is double) {
@@ -337,7 +372,7 @@ void main() {
         var two = [o, o, o, o, o, o, o, o];
         var three = [two, two, two, two, two, two, two, two];
         var four = [three];
-        var output = List(1 * 8 * 8 * 3).reshape([1, 8, 8, 3]);
+        var output = List.filled(1 * 8 * 8 * 3, 0).reshape([1, 8, 8, 3]);
         interpreter.run(four, output);
         var exp = '';
         if (output[0][0][0][0] is double) {
@@ -372,7 +407,7 @@ void main() {
           var two = [o, o, o, o, o, o, o, o];
           var three = [two, two, two, two, two, two, two, two];
           var four = [three];
-          var output = List(1 * 8 * 8 * 3).reshape([1, 8, 8, 3]);
+          var output = List.filled(1 * 8 * 8 * 3, 0).reshape([1, 8, 8, 3]);
           interpreter.run(four, output);
           var exp = '';
           if (output[0][0][0][0] is double) {
