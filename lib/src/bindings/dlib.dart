@@ -33,8 +33,7 @@ DynamicLibrary tflitelib = () {
   } else if (Platform.isIOS) {
     return DynamicLibrary.process();
   } else {
-    final binaryPath = Platform.script.resolveUri(Uri.directory('.')).path +
-        'blobs/$binaryName';
+    final binaryPath = '${Platform.script.resolveUri(Uri.directory('.')).path}blobs/$binaryName';
     final binaryFilePath = Uri(path: binaryPath).toFilePath();
     return DynamicLibrary.open(binaryFilePath);
   }
