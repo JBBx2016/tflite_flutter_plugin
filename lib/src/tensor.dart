@@ -7,7 +7,6 @@ import 'package:tflite_flutter/src/util/byte_conversion_utils.dart';
 
 import 'bindings/tensor.dart';
 import 'bindings/types.dart';
-
 import 'ffi/helper.dart';
 import 'quanitzation_params.dart';
 import 'util/list_shape_extension.dart';
@@ -35,8 +34,7 @@ class Tensor {
   /// Underlying data buffer as bytes.
   Uint8List get data {
     final data = cast<Uint8>(tfLiteTensorData(_tensor));
-    return UnmodifiableUint8ListView(
-        data.asTypedList(tfLiteTensorByteSize(_tensor)));
+    return data.asTypedList(tfLiteTensorByteSize(_tensor));
   }
 
   /// Quantization Params associated with the model, [only Android]
